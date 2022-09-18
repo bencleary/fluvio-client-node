@@ -315,8 +315,6 @@ export class PartitionConsumer {
     }
 
     async stream_with_config(offset: Offset, wasm_module_path: string, cb: (record: Record) => void): Promise<void> {
-        console.log(wasm_module_path);
-        console.log(this.inner);
         await this.inner.streamWithConfig(offset, wasm_module_path, cb)
         return 
     }
