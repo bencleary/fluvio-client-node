@@ -5,14 +5,18 @@ use crate::error::FluvioErrorJS;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::io::Read;
 use log::{debug, error};
-use fluvio::PartitionConsumer;
+use fluvio::{PartitionConsumer, ConsumerConfig};
 use fluvio::{Offset, FluvioError};
 use fluvio::dataplane::fetch::{FetchablePartitionResponse, AbortedTransaction};
 use fluvio::dataplane::record::RecordSet;
 use fluvio::consumer::Record;
-use fluvio_future::task::spawn;
+use fluvio_future::task::{spawn};
 use fluvio_future::io::{Stream, StreamExt};
+use fluvio::consumer::{SmartModuleInvocation, SmartModuleInvocationWasm, SmartModuleKind};
+use flate2::bufread::GzEncoder;
+use flate2::Compression;
 
 use node_bindgen::derive::node_bindgen;
 use node_bindgen::core::NjError;
@@ -99,13 +103,69 @@ impl PartitionConsumerJS {
         Ok(())
     }
 
+    #[node_bindgen(mt)]
+    async fn stream_with_config<F: Fn(RecordJS) + 'static + Send + Sync>(
+        &self,
+        offset: OffsetWrapper,
+        wasm_module_path: String,
+        cb: F,
+    ) -> Result<(), FluvioErrorJS> {
+        let client = self
+            .inner
+            .as_ref()
+            .ok_or_else(|| FluvioError::Other(CLIENT_NOT_FOUND_ERROR_MSG.to_string()))?;
+
+        spawn(Self::stream_inner_with_config(
+            client.clone(),
+            offset,
+            wasm_module_path,
+            cb,
+        ));
+        Ok(())
+    }
+
+    async fn stream_inner_with_config<F: Fn(RecordJS)>(
+        client: Arc<PartitionConsumer>,
+        offset: OffsetWrapper,
+        wasm_module_path: String,
+        cb: F,
+    ) -> Result<(), FluvioErrorJS> {
+        let raw_buffer = std::fs::read(wasm_module_path);
+        let mut encoder = GzEncoder::new(
+            raw_buffer.as_ref().unwrap().as_slice(),
+            Compression::default(),
+        );
+        let mut buffer = Vec::with_capacity(raw_buffer.as_ref().unwrap().len());
+        encoder.read_to_end(&mut buffer);
+
+        let mut builder = ConsumerConfig::builder();
+        builder.smartmodule(Some(SmartModuleInvocation {
+            wasm: SmartModuleInvocationWasm::AdHoc(buffer),
+            kind: SmartModuleKind::Filter,
+            params: Default::default(),
+        }));
+        let config = builder.build().expect("Failed to create config");
+
+        let mut stream = client.stream_with_config(offset.0, config).await?;
+
+        debug!("Waiting for stream");
+        while let Some(next) = stream.next().await {
+            match next {
+                Ok(record) => cb(RecordJS::from(record)),
+                Err(e) => error!("Error consuming record: {:?}", e),
+            }
+        }
+        debug!("Stream ended!");
+
+        Ok(())
+    }
+
     async fn stream_inner<F: Fn(RecordJS)>(
         client: Arc<PartitionConsumer>,
         offset: OffsetWrapper,
         cb: F,
     ) -> Result<(), FluvioErrorJS> {
         let mut stream = client.stream(offset.0).await?;
-
         debug!("Waiting for stream");
         while let Some(next) = stream.next().await {
             match next {

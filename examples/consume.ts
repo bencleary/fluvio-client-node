@@ -1,7 +1,7 @@
 /* tslint:disable:no-console */
-import Fluvio, { Offset, Record } from '@fluvio/client'
+import Fluvio, { ConsumerConfigWrapper, Offset, Record } from '@fluvio/client'
 
-const TOPIC_NAME = 'node-examples'
+const TOPIC_NAME = 'mqtt'
 const PARTITION = 0
 
 async function consume() {
@@ -18,8 +18,11 @@ async function consume() {
 
         console.log('read from the beginning')
 
-        await consumer.stream(
+        let file_path =
+            '/Users/bencleary/Development/device-filter/target/wasm32-unknown-unknown/debug/device_filter.wasm'
+        await consumer.stream_with_config(
             Offset.FromBeginning(),
+            file_path,
             async (record: Record) => {
                 // handle record;
                 console.log(
@@ -27,6 +30,7 @@ async function consume() {
                 )
             }
         )
+
     } catch (ex) {
         console.log('error', ex)
     }

@@ -219,9 +219,17 @@ export class TopicProducer {
     }
 }
 
+
+export interface ConsumerConfigWrapper {
+    file_path: string;
+    wasm_module: Buffer;
+}
+
 export interface PartitionConsumer {
     fetch(offset?: Offset): Promise<FetchablePartitionResponse>
+    // stream(offset: Offset, cb: (record: Record) => void): Promise<void>
     stream(offset: Offset, cb: (record: Record) => void): Promise<void>
+    stream_with_config(offset: Offset, wasm_module_path: string, cb: (record: Record) => void): Promise<void>
     endStream(): Promise<void>
     createStream(offset: Offset): Promise<AsyncIterable<Record>>
 }
@@ -300,9 +308,17 @@ export class PartitionConsumer {
         return await this.inner.fetch(offset)
     }
 
+    // async stream(offset: Offset, cb: (record: Record) => void): Promise<void> {
     async stream(offset: Offset, cb: (record: Record) => void): Promise<void> {
         await this.inner.stream(offset, cb)
         return
+    }
+
+    async stream_with_config(offset: Offset, wasm_module_path: string, cb: (record: Record) => void): Promise<void> {
+        console.log(wasm_module_path);
+        console.log(this.inner);
+        await this.inner.streamWithConfig(offset, wasm_module_path, cb)
+        return 
     }
 
     /**
@@ -683,6 +699,7 @@ export default class Fluvio implements FluvioClient {
     ): Promise<PartitionConsumer> {
         this.checkConnection()
         const inner = await this.client?.partitionConsumer(topic, partition)
+        console.log(inner);
         if (!inner) {
             throw new Error('Failed to create partition consumer')
         }
